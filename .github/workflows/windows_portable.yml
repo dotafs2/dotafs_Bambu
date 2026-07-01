@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - master
+    tags:
+      - 'bambustudio-windows-*'
     paths:
       - '.github/workflows/windows_portable.yml'
       - 'build_win.bat'
@@ -20,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -119,3 +121,13 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE $env:ZIP_NAME
+          gh release create "${{ github.ref_name }}" $zipPath `
+            --title "Bambu Studio Windows ${{ github.ref_name }}" `
+            --notes "Windows portable build from ${{ github.sha }}."
