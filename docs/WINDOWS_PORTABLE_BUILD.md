@@ -8,6 +8,7 @@ Workflow:
 - Runs automatically on `master` when application source/build files change.
 - Can also be started manually from GitHub Actions with `Run workflow`.
 - Produces an artifact named like `BambuStudio_Windows_V*_portable.zip`.
+- Caches the Windows dependency install directory with a manually versioned cache key. If dependency definitions under `deps/` change, bump the cache version in `.github/workflows/windows_portable.yml`.
 
 How to use it on another Windows computer:
 

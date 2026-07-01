@@ -55,7 +55,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: deps/build/BambuStudio_dep
-          key: windows-2022-bambustudio-deps-${{ hashFiles('deps/**') }}
+          # Bump this version manually when dependency definitions under deps/ change.
+          key: windows-2022-bambustudio-deps-v1
+          restore-keys: |
+            windows-2022-bambustudio-deps-
 
       - name: Build dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
