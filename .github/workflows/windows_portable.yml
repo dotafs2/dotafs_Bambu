@@ -1,0 +1,118 @@
+name: Windows Portable Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/windows_portable.yml'
+      - 'build_win.bat'
+      - 'deps/**'
+      - 'src/**'
+      - 'resources/**'
+      - 'bbl/**'
+      - '**/CMakeLists.txt'
+      - 'version.inc'
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows portable zip
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Check tools
+        run: |
+          cmake --version
+          msbuild -version
+
+      - name: Install packaging tools
+        run: |
+          choco install strawberryperl pkgconfiglite nsis -y --no-progress
+
+      - name: Cache BambuStudio dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: deps/build/BambuStudio_dep
+          key: windows-2022-bambustudio-deps-${{ hashFiles('deps/**') }}
+
+      - name: Build dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          New-Item -ItemType Directory -Force -Path deps/build/BambuStudio_dep | Out-Null
+          Push-Location deps/build
+          cmake ../ -G "Visual Studio 17 2022" -A x64 -DDESTDIR="./BambuStudio_dep" -DCMAKE_BUILD_TYPE=Release -DDEP_DEBUG=OFF
+          msbuild /m ALL_BUILD.vcxproj
+          Pop-Location
+
+      - name: Locate Windows SDK
+        run: |
+          $includeRoot = "C:\Program Files (x86)\Windows Kits\10\Include"
+          $sdk = Get-ChildItem $includeRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdk) {
+            throw "Windows 10 SDK include directory was not found under $includeRoot"
+          }
+          "WIN10SDK_PATH=$($sdk.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+
+      - name: Configure Bambu Studio
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          Push-Location build
+          cmake .. `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DBBL_RELEASE_TO_PUBLIC=1 `
+            -DBBL_INTERNAL_TESTING=0 `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" `
+            -DCMAKE_INSTALL_PREFIX="../install-dir" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DWIN10SDK_PATH="$env:WIN10SDK_PATH"
+          Pop-Location
+
+      - name: Build and install Bambu Studio
+        run: |
+          Push-Location build
+          cmake --build . --target install --config Release -- /m
+          Pop-Location
+
+      - name: Package portable zip
+        run: |
+          $versionContent = Get-Content version.inc -Raw
+          if ($versionContent -match 'set\(SLIC3R_VERSION "(.*?)"\)') {
+            $version = "V$($matches[1])"
+          } else {
+            $version = "custom"
+          }
+          $zipName = "BambuStudio_Windows_${version}_portable.zip"
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE $zipName
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\install-dir\*" -DestinationPath $zipPath -Force
+          "ZIP_NAME=$zipName" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          Get-ChildItem "$env:GITHUB_WORKSPACE\install-dir" -Recurse -Filter "bambu-studio*.exe" | Select-Object FullName, Length
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+          if-no-files-found: error
